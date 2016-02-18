@@ -14,12 +14,14 @@
 // - - - - - - - - - - - - - - - - - - -
 // - - - EncMotControl CONSTRUCTOR - - -
 // - - - - - - - - - - - - - - - - - - -
-EncMotControl::EncMotControl(int in1Pin, int in2Pin, int pwmPin, int mpuAddPin)
+EncMotControl::EncMotControl(int in1Pin, int in2Pin, int pwmPin, int mpuAddPin, double calib, bool debug)
 {
     _mpuAddPin = mpuAddPin;
+    _calib = calib;
     _motorDriverPWMpin = pwmPin;
     _motorDriverIN1pin = in1Pin;
     _motorDriverIN2pin = in2Pin;
+    _debug = debug;
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -32,8 +34,8 @@ void EncMotControl::begin()
     pinMode(_motorDriverIN2pin, OUTPUT);
     pinMode(_mpuAddPin, OUTPUT);
     pathFollowing = false;
-    pid.begin(1.2f, 0.000f, 0.0f, 3.0f);
-    pid.setSetPoint(0.0f);
+    pid.begin(0.2, 0.000, 0.0, 0.5, 0.1, 0, false);
+    pid.setSetPoint(0.0);
     setMode(1);
 }
 
@@ -45,10 +47,23 @@ void EncMotControl::initStep1()
     digitalWrite(_mpuAddPin, HIGH);
     delay(5);
     mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G, 0x69);
-    mpu.setDLPFMode(MPU6050_DLPF_4);   
-    pid.begin(5.2f, 0.04f, 0.0f, 0.01f);
+    mpu.setDLPFMode(MPU6050_DLPF_2);   
     pathFollowing = true;
-    pid.setSetPoint(4.71f);
+    pid.begin(20.0, 0.000, 0.0, 0.01, 0.1, 0, false);
+    pid.setSetPoint(_calib);
+    digitalWrite(_mpuAddPin, LOW);
+}
+
+// - - - - - - - - - - - - - - - - - - -
+// - - - EncMotControl INIT 1  - - - - -
+// - - - - - - - - - - - - - - - - - - -
+void EncMotControl::initStep1_5()
+{
+    digitalWrite(_mpuAddPin, HIGH);
+    delay(5);
+    if(_getRotAngle() > _calib - 0.002 && _getRotAngle() < _calib + 0.002){
+        pathFollowing = false;
+    }
     _updatePIDinit();
     digitalWrite(_mpuAddPin, LOW);
 }
@@ -59,11 +74,11 @@ void EncMotControl::initStep1()
 void EncMotControl::initStep2()
 {
     pathFollowing = false;
-    pid.setSetPoint(0.0f);
+    pid.setSetPoint(0.0);
     analogWrite(_motorDriverPWMpin, 0);
     digitalWrite(_motorDriverIN1pin, HIGH);
     digitalWrite(_motorDriverIN2pin, HIGH);
-    pid.begin(0.9f, 0.01f, 0.00f, 3.0f);
+    pid.begin(2.5, 0.00001, 00.0, 1.5, 1.0, 0, _debug);
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -72,11 +87,11 @@ void EncMotControl::initStep2()
 void EncMotControl::update(Encoder enc)
 {
     _currentEncCount = enc.count;
-    if(pathFollowing){
-        _followPath();
-    }
     if(_currentEncCount == _goalPos){
         pathFollowing = false;
+    }
+    if(pathFollowing){
+        _followPath();
     }
     _updatePID();
 }
@@ -86,7 +101,7 @@ void EncMotControl::update(Encoder enc)
 // - - - - - - - - - - - - - - - - - - -
 void EncMotControl::_updatePID()
 {
-    analogWrite(_motorDriverPWMpin, _setRotDir(pid.update(_getEncCountFloat(), pathFollowing)));
+    analogWrite(_motorDriverPWMpin, _setRotDir(pid.update(_getEncCountDouble(), pathFollowing)));
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -94,13 +109,16 @@ void EncMotControl::_updatePID()
 // - - - - - - - - - - - - - - - - - - -
 void EncMotControl::_updatePIDinit()
 {
+    if(_debug){
+        Serial.println(_getRotAngle());
+    }
     analogWrite(_motorDriverPWMpin, _setRotDirInit(pid.update(_getRotAngle(), pathFollowing)));
 }
 
 // - - - - - - - - - - - - - - - - - - -
 // EncMotControl UPDATE PID EXTERNAL PATH
 // - - - - - - - - - - - - - - - - - - -
-void EncMotControl::updatePID_ext(float setPoint, Encoder enc)
+void EncMotControl::updatePID_ext(double setPoint, Encoder enc)
 {
     int _dif;
     //find out in which direction the motor is moving!
@@ -116,11 +134,9 @@ void EncMotControl::updatePID_ext(float setPoint, Encoder enc)
         _directionOfMovement = 3;
     }
     _enc_lastCount = enc.count;
-    Serial.println(_dif);
-    Serial.println(_directionOfMovement);
 
     pid.setSetPoint(setPoint);
-    analogWrite(_motorDriverPWMpin, _setRotDir(pid.update((float)enc.count, true)));
+    analogWrite(_motorDriverPWMpin, _setRotDir(pid.update((double)enc.count, true)));
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -128,10 +144,10 @@ void EncMotControl::updatePID_ext(float setPoint, Encoder enc)
 // - - - - - - - - - - - - - - - - - - -
 int EncMotControl::_setRotDirInit(int val)
 {
-    if(val == 0.0f){
+    if(val == 0){
         digitalWrite(_motorDriverIN1pin, HIGH);
         digitalWrite(_motorDriverIN2pin, HIGH);
-    }else if(val > 0.0f){
+    }else if(val > 0){
         digitalWrite(_motorDriverIN1pin, HIGH);
         digitalWrite(_motorDriverIN2pin, LOW);
     }else{
@@ -147,42 +163,30 @@ int EncMotControl::_setRotDirInit(int val)
 int EncMotControl::_setRotDir(int val)
 {
     if(val == 0.0f){
-        digitalWrite(_motorDriverIN1pin, LOW);
-        digitalWrite(_motorDriverIN2pin, LOW);
+        digitalWrite(_motorDriverIN1pin, HIGH);
+        digitalWrite(_motorDriverIN2pin, HIGH);
     }else if(val > 0.0f){
-        //PID wants to move to the positive...
-        if(_directionOfMovement == 2){
-            //...but the Motor is Moving towards the negative
-            // -> just put on the breaks.
-            digitalWrite(_motorDriverIN1pin, LOW);
-            digitalWrite(_motorDriverIN2pin, LOW);
-            return 0.0f;
-        }else{
-            digitalWrite(_motorDriverIN1pin, LOW);
-            digitalWrite(_motorDriverIN2pin, HIGH);
-        }
+        digitalWrite(_motorDriverIN1pin, LOW);
+        digitalWrite(_motorDriverIN2pin, HIGH);
     }else{
-        //PID wants to move to the negative...
-        if(_directionOfMovement == 1){
-            //...but the Motor is Moving towards the positive
-            // -> just put on the breaks.
-            digitalWrite(_motorDriverIN1pin, LOW);
-            digitalWrite(_motorDriverIN2pin, LOW);
-            return 0.0f;
-        }else{
         digitalWrite(_motorDriverIN1pin, HIGH);
         digitalWrite(_motorDriverIN2pin, LOW);
-        }
     }
-    return abs(val); 
+    if(abs(val) == 255){        //BUG fix for analogWrite functions! 255 isn't allowed!
+        val = 256;
+    }
+    if(_debug){
+        //Serial.println(abs(val));
+    }
+   return abs(val); 
 }
 
 // - - - - - - - - - - - - - - - - - - -
 // - EncMotControl GET ROTATION COUNT  -
 // - - - - - - - - - - - - - - - - - - -
-float EncMotControl::_getEncCountFloat()
+double EncMotControl::_getEncCountDouble()
 {
-    return (float)_currentEncCount;
+    return (double)_currentEncCount;
     
     
 }
@@ -190,39 +194,39 @@ float EncMotControl::_getEncCountFloat()
 // - - - - - - - - - - - - - - - - - - -
 //  AccMotControl GET ROTATIONAL ANGLE -
 // - - - - - - - - - - - - - - - - - - -
-float EncMotControl::_getRotAngle()
+double EncMotControl::_getRotAngle()
 {
     Vector _tmp;
-    float _ZAxis;
-    float _YAxis;
-    float _aTan;
+    double _ZAxis;
+    double _YAxis;
+    double _aTan;
     _tmp = mpu.readRawAccel();
     _ZAxis = _tmp.ZAxis;
     _YAxis = _tmp.YAxis;
-    if(_YAxis == 0.0f){
-        _YAxis = 0.000000001f;
+    if(_YAxis == 0.0){
+        _YAxis = 0.000000001;
     }
-    _aTan = (float)atan(_ZAxis / _YAxis);
-    if(_YAxis >= 0.0f){
+    _aTan = atan(_ZAxis / _YAxis);
+    if(_YAxis >= 0.0){
         return _aTan + PI; 
-    }else if(_ZAxis < 0.0f){
+    }else if(_ZAxis < 0.0){
         return _aTan;
-    }else if(_ZAxis >= 0.0f){
+    }else if(_ZAxis >= 0.0){
         return _aTan + 2*PI;
     }
-    return 0.0f;
+    return 0.0;
 }
 
 // - - - - - - - - - - - - - - - - - - -
 // - - - - EncMotControl MOVE  - - - - -
 // - - - - - - - - - - - - - - - - - - -
-void EncMotControl::move(float goalPos, unsigned int moveTime, unsigned int moveSlopeTime)
+void EncMotControl::move(int goalPos, unsigned int moveTime, unsigned int moveSlopeTime)
 {
     pathFollowing = true;
-    _goalPos = goalPos;
+    _goalPos = (double)goalPos;
     _moveTime = moveTime;
     _moveSlopeTime = moveSlopeTime;
-    _startPos = _getEncCountFloat();
+    _startPos = _getEncCountDouble();
     _startTime = millis();
     if(_mode == 1){
         _calculatePathVars1();
@@ -279,7 +283,7 @@ void EncMotControl::_followStartSlope()
     if(_mode == 1){
         pid.setSetPoint(_startPos + _passedTime * _passedTime * _slope / 2);
     }else{
-        pid.setSetPoint(_startPos + ( sin(-PI/2 + (float)_passedTime / _moveSlopeTime * PI) 
+        pid.setSetPoint(_startPos + ( sin(-PI/2 + (double)_passedTime / _moveSlopeTime * PI) 
                 + 1 ) / 4 * _slope * _passedTime * _passedTime);
     }
 }
@@ -304,7 +308,7 @@ void EncMotControl::_followEndSlope()
                 * passedTimeSinceStartEndSlope); 
     }else{
         pid.setSetPoint(_startPos + _straightMoveEndPos
-                + (_maxSpeed - (sin( -PI/2 + (float)passedTimeSinceStartEndSlope / _moveSlopeTime * PI) 
+                + (_maxSpeed - (sin( -PI/2 + (double)passedTimeSinceStartEndSlope / _moveSlopeTime * PI) 
                 + 1 ) / 2 * _slope / 2 * passedTimeSinceStartEndSlope)
                 * passedTimeSinceStartEndSlope);
     }
