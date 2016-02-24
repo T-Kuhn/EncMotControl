@@ -241,7 +241,9 @@ void EncMotControl::_followPath()
     _currentTime = millis();
     _passedTime = _currentTime - _startTime;
 
-    if(_moveSlopeTime >= _passedTime){
+    if(_getEncCountDouble() + 10 >= _goalPos && _getEncCountDouble() - 10 <= _goalPos){
+        pid.setSetPoint(_goalPos);
+    }else if(_moveSlopeTime >= _passedTime){
         _followStartSlope();
     }else if(_moveSlopeTime + _moveStraightTime >= _passedTime){
         _followStraightLine();
