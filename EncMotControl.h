@@ -36,7 +36,7 @@ class EncMotControl
         int _setRotDirInit(int val);
         double _getEncCountDouble();
         double _getRotAngle();
-        void _calculatePathVars1();
+        void _calculatePathVars();
         void _followPath();
         void _followStartSlope();
         void _followStraightLine();
@@ -61,8 +61,6 @@ class EncMotControl
         double _slope;
         double _startSlopeEndPos;
         double _straightMoveEndPos;
-        int _enc_lastCount;
-        int _directionOfMovement;
         // 1 : moving in the positive direction
         // 2 : moving towards the negative
         // 3 : not moving at all

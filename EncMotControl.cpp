@@ -87,7 +87,7 @@ void EncMotControl::initStep2()
 void EncMotControl::update(Encoder enc)
 {
     _currentEncCount = enc.count;
-    if(_currentEncCount == _goalPos){
+    if((double)_currentEncCount == _goalPos){
         pathFollowing = false;
     }
     if(pathFollowing){
@@ -120,21 +120,6 @@ void EncMotControl::_updatePIDinit()
 // - - - - - - - - - - - - - - - - - - -
 void EncMotControl::updatePID_ext(double setPoint, Encoder enc)
 {
-    int _dif;
-    //find out in which direction the motor is moving!
-    _dif = enc.count - _enc_lastCount;
-    if(_dif > 0){
-        //moveing in the positive direction!
-        _directionOfMovement = 1;
-    }else if (_dif < 0){
-        //moving towards the negative
-        _directionOfMovement = 2;
-    }else{
-        //not moving at all!
-        _directionOfMovement = 3;
-    }
-    _enc_lastCount = enc.count;
-
     pid.setSetPoint(setPoint);
     analogWrite(_motorDriverPWMpin, _setRotDir(pid.update((double)enc.count, true)));
 }
@@ -187,8 +172,6 @@ int EncMotControl::_setRotDir(int val)
 double EncMotControl::_getEncCountDouble()
 {
     return (double)_currentEncCount;
-    
-    
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -228,17 +211,14 @@ void EncMotControl::move(int goalPos, unsigned int moveTime, unsigned int moveSl
     _moveSlopeTime = moveSlopeTime;
     _startPos = _getEncCountDouble();
     _startTime = millis();
-    if(_mode == 1){
-        _calculatePathVars1();
-    }else{
-        //sinusoidal ramps. Not yet implemented
-    }
+ 
+    _calculatePathVars();
 }
 
 // - - - - - - - - - - - - - - - - - - - - - 
-// - EncMotControl CALCULATE PATHVARS  1 - -
+// - EncMotControl CALCULATE PATHVARS  - - -
 // - - - - - - - - - - - - - - - - - - - - -
-void EncMotControl::_calculatePathVars1()
+void EncMotControl::_calculatePathVars()
 {
     _distance = _goalPos - _startPos; // can be minus
     if(2 * _moveSlopeTime < _moveTime){
@@ -260,18 +240,15 @@ void EncMotControl::_followPath()
 {
     _currentTime = millis();
     _passedTime = _currentTime - _startTime;
+
     if(_moveSlopeTime >= _passedTime){
         _followStartSlope();
-        return;
     }else if(_moveSlopeTime + _moveStraightTime >= _passedTime){
         _followStraightLine();
-        return;
     }else if(2 * _moveSlopeTime + _moveStraightTime >= _passedTime){
         _followEndSlope();
-        return;
     }else{
         pid.setSetPoint(_goalPos);
-        //pathFollowing = false; // in the END...
     }
 }
 
@@ -280,12 +257,7 @@ void EncMotControl::_followPath()
 // - - - - - - - - - - - - - - - - - - -
 void EncMotControl::_followStartSlope()
 {
-    if(_mode == 1){
-        pid.setSetPoint(_startPos + _passedTime * _passedTime * _slope / 2);
-    }else{
-        pid.setSetPoint(_startPos + ( sin(-PI/2 + (double)_passedTime / _moveSlopeTime * PI) 
-                + 1 ) / 4 * _slope * _passedTime * _passedTime);
-    }
+    pid.setSetPoint(_startPos + _passedTime * _passedTime * _slope / 2);
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -302,16 +274,10 @@ void EncMotControl::_followStraightLine()
 void EncMotControl::_followEndSlope()
 {
     unsigned int passedTimeSinceStartEndSlope = _passedTime - _moveSlopeTime - _moveStraightTime;
-    if(_mode == 1){
-        pid.setSetPoint(_startPos + _straightMoveEndPos
-                + (_maxSpeed - _slope / 2 * passedTimeSinceStartEndSlope) 
-                * passedTimeSinceStartEndSlope); 
-    }else{
-        pid.setSetPoint(_startPos + _straightMoveEndPos
-                + (_maxSpeed - (sin( -PI/2 + (double)passedTimeSinceStartEndSlope / _moveSlopeTime * PI) 
-                + 1 ) / 2 * _slope / 2 * passedTimeSinceStartEndSlope)
-                * passedTimeSinceStartEndSlope);
-    }
+    
+    pid.setSetPoint(_startPos + _straightMoveEndPos
+            + (_maxSpeed - _slope / 2 * passedTimeSinceStartEndSlope) 
+            * passedTimeSinceStartEndSlope); 
 }
 
 // - - - - - - - - - - - - - - - - - - -
@@ -320,7 +286,6 @@ void EncMotControl::_followEndSlope()
 void EncMotControl::setMode(int nmbr)
 {
     // nmbr ->  1:  linear speedgain
-    //          2:  S-curveed speedgain
     _mode = nmbr;
 }
 
